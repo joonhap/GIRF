@@ -1,0 +1,20 @@
+#!/bin/sh
+#PBS -N stf
+#PBS -l walltime=5:00:00
+#PBS -V
+
+#PBS -j oe
+#PBS -m abe
+#PBS -M joonhap@umich.edu
+
+##change -M -A and -l qos= to valid values
+
+##which cluster to use
+#PBS -q flux
+#PBS -A stats_flux
+#PBS -l qos=flux
+
+#
+cd $PBS_O_WORKDIR
+./direct_stf
+
