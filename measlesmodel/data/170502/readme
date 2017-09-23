@@ -1,0 +1,5 @@
+uses yet another new version of the imdmeasure. In this version, the variance of projection is computed as a sum of conditional variances over quarter time intervals (see the code for more details.)
+
+G=500, ncity=20, parameter setting = 9.
+
+mif parameter searches were performed in 2 dimensional grid, where the reporting rate and the value of G fixed.
