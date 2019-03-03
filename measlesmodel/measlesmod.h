@@ -3,14 +3,17 @@
 
 #include <omp.h>
 
-extern double dist[20][20];
-extern int birth_data[21][20];
+#define NCITY 40
+#define NYEAR 21
+
+extern double dist[NCITY][NCITY];
+extern int birth_data[NYEAR][NCITY];
 extern int birth_data_first_year;
 extern int birth_data_last_year;
-extern int pop_data[21][20];
+extern int pop_data[NYEAR][NCITY];
 extern int pop_data_first_year;
 extern int pop_data_last_year;
-extern int cityindex[20];
+extern int cityindex[NCITY];
 extern double dist_mean;
 extern double pop_mean;
 extern double school_prop;

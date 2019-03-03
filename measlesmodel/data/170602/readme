@@ -1,1 +1,0 @@
-runs mif iterations for initial value parameter (ivp) estimation with only the first few observations, before running the full mif for the estimation of non-ivp parameters.

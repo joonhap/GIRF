@@ -1,14 +1,19 @@
 ## State inference
-LMSE <- function(nvar, alpha, diagCov=FALSE) {
+LMSE <- function(nvar, alpha, diagCov=FALSE, im, maxla, R, J) {
+    ## for the linear Gaussian model, compute the exact likelihood and filtering distributions
+    ## Then compare with the estimated values from the GIRF and compute the mean squared errors (MSE)
     ## alpha: non-diagonal entries of the jump covariance matrix
     ## diagCov: was diagonal covariance matrix used for computing predictive likelihood?
+    ## im: number of intermediate steps (S in the manuscript)
+    ## R: number of particle islands, J: number of particles per island
+    
     ntimes = 50
     state0 = rep(0,nvar) #2 * (-(nvar-1)/2) : ((nvar-1)/2);
 
     s = 1.0 # std dev of the marginal distribution of jump in one dimension
     d = 1.0 # measurement error standard deviation
 
-    Sig = matrix(s^2*alphaPt, nvar, nvar); diag(Sig) <- s^2
+    Sig = matrix(s^2*alpha, nvar, nvar); diag(Sig) <- s^2
     D = d^2 * diag(rep(1, nvar))
 
     ofilename = paste('data/obs_K', nvar, 'alpha', format(alpha, nsmall=2), '.txt', sep='')
@@ -41,16 +46,15 @@ LMSE <- function(nvar, alpha, diagCov=FALSE) {
 
     ll
     
-    date = '170216'
+    date = '181228' # '161210'
     directory = date
 
     le <- numeric(); sum_X50_mean <- numeric(nvar); sum_X50_mean_sq <- numeric(nvar)
     MSEE <- numeric()
     rep <- 1
     for (n in 1:rep) {
-        R = 60; J = 1000; N = nvar; options(scipen=7)
-        commonString = paste("_K", nvar, "alpha", format(alpha, nsmall=2), "R", R, "J", J, "N", N, "T", ntimes, "if_", "F", "wi_", "T", "_la", 2, "_", (n-1), ifelse((!diagCov) || (alpha==0), ".txt", "_diag.txt"), sep='')
-        ##commonString = paste("_K", nvar, "alpha", format(alpha, nsmall=2), "R", R, "J", J, "N", N, "_1_unsmoothed.txt", sep='')
+        S = nvar; options(scipen=7)
+        commonString = paste("_K", nvar, "alpha", format(alpha, nsmall=2), ifelse(diagCov, '_diag_', '_exact_'), "R", R, "J", J, "S", im, "T", ntimes, "wi_", "T", "_la", maxla, "_", (n-1), '.txt', sep='')
         lestimate <- read.table(paste("data/",directory,"/im_est_likelihood", commonString, sep=''))
         lestimate <- lestimate[dim(lestimate)[1]-(ntimes-1):0,]
         le[n] <- sum(lestimate)
@@ -70,6 +74,17 @@ LMSE <- function(nvar, alpha, diagCov=FALSE) {
     return(list(MSE = MSE, L = L))
 }
 
+APF5 <- LMSE(5, alpha=0, diagCov=TRUE, im=1, maxla=1, R=1, J=10000)
+GIRF5 <- LMSE(5, alpha=0, diagCov=TRUE, im=5, maxla=2, R=1, J=2000)
+APF10 <- LMSE(10, alpha=0, diagCov=TRUE, im=1, maxla=1, R=1, J=20000)
+GIRF10 <- LMSE(10, alpha=0, diagCov=TRUE, im=10, maxla=2, R=1, J=2000)
+APF50 <- LMSE(50, alpha=0, diagCov=TRUE, im=1, maxla=1, R=5, J=20000)
+GIRF50 <- LMSE(50, alpha=0, diagCov=TRUE, im=50, maxla=2, R=1, J=2000)
+APF200 <- LMSE(200, alpha=0, diagCov=TRUE, im=1, maxla=1, R=20, J=20000)
+GIRF200 <- LMSE(200, alpha=0, diagCov=TRUE, im=200, maxla=2, R=1, J=2000)
+
+
+
 MSE_dim <- sapply(c(20,50,100,200), function(d) LMSE(d, alpha=0.00, diagCov=FALSE)$MSE) ## saved as MSE_dim.txt 
 L_dim <- sapply(c(20,50,100,200), function(d) LMSE(d, alpha=0.00, diagCov=FALSE)$L) 
 MSE_alpha_exact20 <- sapply(0.1*0:5, function(a) LMSE(20, a, diagCov=FALSE)$MSE)
@@ -81,47 +96,54 @@ L_alpha_exact50 <- sapply(0.1*0:5, function(a) LMSE(50, a, diagCov=FALSE)$L)
 MSE_alpha_diag50 <- sapply(0.1*0:5, function(a) LMSE(50, a, diagCov=TRUE)$MSE)
 L_alpha_diag50 <- sapply(0.1*0:5, function(a) LMSE(50, a, diagCov=TRUE)$L) 
 
-MSE_dim <- read.table('data/161210/MSE_dim.txt', row.names=1)
-L_dim <- read.table('data/161210/L_dim.txt', row.names=1)
-MSE_alpha_exact20 <- read.table('data/161210/MSE_alpha_exact20.txt', row.names=1)
-L_alpha_exact20 <- read.table('data/161210/L_alpha_exact20.txt', row.names=1)
-MSE_alpha_diag20 <- read.table('data/161210/MSE_alpha_diag20.txt', row.names=1)
-L_alpha_diag20 <- read.table('data/161210/L_alpha_diag20.txt', row.names=1)
-MSE_alpha_exact50 <- read.table('data/161210/MSE_alpha_exact50.txt', row.names=1)
-L_alpha_exact50 <- read.table('data/161210/L_alpha_exact50.txt', row.names=1)
-MSE_alpha_diag50 <- read.table('data/161210/MSE_alpha_diag50.txt', row.names=1)
-L_alpha_diag50 <- read.table('data/161210/L_alpha_diag50.txt', row.names=1)
+MSE_dim <- as.matrix(read.table('data/161210/MSE_dim.txt', row.names=1))
+L_dim <- as.matrix(read.table('data/161210/L_dim.txt', row.names=1))
+MSE_alpha_exact20 <- as.matrix(read.table('data/161210/MSE_alpha_exact20.txt', row.names=1))
+L_alpha_exact20 <- as.matrix(read.table('data/161210/L_alpha_exact20.txt', row.names=1))
+MSE_alpha_diag20 <- as.matrix(read.table('data/161210/MSE_alpha_diag20.txt', row.names=1))
+L_alpha_diag20 <- as.matrix(read.table('data/161210/L_alpha_diag20.txt', row.names=1))
+MSE_alpha_exact50 <- as.matrix(read.table('data/161210/MSE_alpha_exact50.txt', row.names=1))
+L_alpha_exact50 <- as.matrix(read.table('data/161210/L_alpha_exact50.txt', row.names=1))
+MSE_alpha_diag50 <- as.matrix(read.table('data/161210/MSE_alpha_diag50.txt', row.names=1))
+L_alpha_diag50 <- as.matrix(read.table('data/161210/L_alpha_diag50.txt', row.names=1))
 
 ##pdf('plots/161210/MSE_dim(alpha0.00R60J1000).pdf')
-par(mar=c(3.5,3.9,1,1))
-plot(MSE_dim["k",], MSE_dim["MSE",], type='b', ann=FALSE, xlim=c(20,200), ylim=c(0,0.01), xaxt='n')
+##pdf('report/JRSSB/figures/MSE_dim(alpha0.00R60J1000).pdf', width=8, height=5)
+par(mar=c(3.5,5.5,1,1))
+plot(MSE_dim["k",], MSE_dim["MSE",], type='b', ann=FALSE, xlim=c(20,200), ylim=c(0,0.01), xaxt='n', yaxt='n')
 points(MSE_dim["k",], MSE_dim["bias_sq",], type='b', lty=2, pch=2)
 abline(h=0)
-legend('topleft', legend=c('MSE', expression(bias^2)), lty=c(1,2), pch=c(1,2), cex=1.3)
-axis(side=1, at=c(0,20,50,100,200))
-mtext('Dimension', side=1, line=2.5, cex=1.3)
-mtext('Mean squared error (average over all sites)', side=2, line=2.5, cex=1.3)
+##legend('topleft', legend=c('MSE', expression(bias^2)), lty=c(1,2), pch=c(1,2), cex=1.3)
+axis(side=1, at=c(0,20,50,100,200), cex.axis=1.6)
+axis(side=2, cex.axis=1.6)
+mtext('Dimension', side=1, line=2.5, cex=1.6)
+mtext('Mean squared error \n(average over all sites)', side=2, line=2.5, cex=1.6)
 ##dev.off()
 
 ##pdf('plots/161210/MSE_alpha(dim20R60J1000).pdf')
-par(mar=c(3.5,3.9,1,1))
-plot(MSE_alpha_diag20["alpha",], MSE_alpha_diag20["MSE",], type='b', lty=5, pch=4, ann=FALSE, xlim=c(0,0.5), ylim=c(0,0.0088))
+pdf('report/JRSSB/figures/MSE_alpha(dim20R60J1000).pdf', width=8, height=5)
+par(mar=c(3.5,6,1,1))
+plot(MSE_alpha_diag20["alpha",], MSE_alpha_diag20["MSE",], type='b', lty=5, pch=4, ann=FALSE, xlim=c(0,0.5), ylim=c(0,0.0088), cex.axis=1.8)
 points(MSE_alpha_exact20["alpha",], MSE_alpha_exact20["MSE",], type='b')
 abline(h=0)
-legend('topleft', legend=c('Diagonal covariance used', 'Exact covariance used'), lty=c(5,1), pch=c(4,1), cex=1.3)
-mtext('Correlation coefficient', side=1, line=2.5, cex=1.3)
-mtext('Mean squared error (average over all sites)', side=2, line=2.5, cex=1.3)
+#legend('topleft', legend=c('Diagonal covariance used', 'Exact covariance used'), lty=c(5,1), pch=c(4,1), cex=1.3)
+mtext('Correlation coefficient', side=1, line=2.5, cex=1.8)
+mtext('Mean squared error\n (average over all sites)', side=2, line=2.8, cex=1.8)
+dev.off()
 ##dev.off()
 
 ##pdf('plots/161210/MSE_alpha(dim50R60J1000).pdf')
-par(mar=c(3.5,3.9,1,1))
-plot(MSE_alpha_diag50["alpha",], MSE_alpha_diag50["MSE",], type='b', lty=5, pch=4, ann=FALSE, xlim=c(0,0.5), ylim=c(0,0.046))
+pdf('report/JRSSB/figures/MSE_alpha(dim50R60J1000).pdf', width=8, height=5)
+par(mar=c(3.5,2.5,1,1))
+plot(MSE_alpha_diag50["alpha",], MSE_alpha_diag50["MSE",], type='b', lty=5, pch=4, ann=FALSE, xlim=c(0,0.5), ylim=c(0,0.046), cex.axis=1.8)
 points(MSE_alpha_exact50["alpha",], MSE_alpha_exact50["MSE",], type='b')
 abline(h=0)
-legend('topleft', legend=c('Diagonal covariance used', 'Exact covariance used'), lty=c(5,1), pch=c(4,1), cex=1.3)
-mtext('Correlation coefficient', side=1, line=2.5, cex=1.3)
-mtext('Mean squared error (average over all sites)', side=2, line=2.5, cex=1.3)
+##legend('topleft', legend=c('Diagonal covariance used', 'Exact covariance used'), lty=c(5,1), pch=c(4,1), cex=1.3)
+mtext('Correlation coefficient', side=1, line=2.5, cex=1.8)
+##mtext('Mean squared error\n (average over all sites)', side=2, line=2.5, cex=1.8)
+dev.off()
 ##dev.off()
+
 
 
 t=ntimes
@@ -136,8 +158,7 @@ legend('topright', legend=c('Exact', 'Estimated'), lty=c(1,2), pch=c(1,4), bg='w
 title(main=paste('t = ',t, ',  J = ', J, ', R = ', R,  sep=''), xlab='Sites', ylab='Posterior mean')
 ##points(1:nvar, latent_states[t,], col=2)
 ##points(1:nvar, Ymat[t,], col=3, pch=4)
-
-dev.off()
+##dev.off()
 
 
 

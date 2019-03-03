@@ -1,10 +1,12 @@
 // defines dprocess, rprocess, dmeasure, rmeasure, mdprocess, mrprocess
-#include "stf_parallel.h"
+#include "../stf_parallel.h"
 #include "linmod.h"
 
 using std::vector;
 using std::cout;
 using std::endl;
+
+bool annealed = false; // the forecast likelihoods are NOT raised to fractional powers depending on the forecast time length
 
 double ncdf(double value) { // normal cdf
   return 0.5 * std::erfc(-value * M_SQRT1_2);
@@ -119,15 +121,20 @@ void stf<double, double>::imrprocess(int t, int s, int im, const vector<double>&
 
 // // // imdmeasure // // //
 template<>
-vector<double> stf<double, double>::imdmeasure(int t, int s, vector<int> lookaheads, int im, const vector<double>& state, const vector<vector<double> >& meas, const vector<double>& theta, bool logarithm) {
+vector<double> stf<double, double>::imdmeasure(int t, int s, vector<int> lookaheads, int im, const vector<double>& state, const vector<vector<double> >& meas, const vector<double>& theta, vector<vector<double> >& forecast_var, bool logarithm) {
   // the density of auxiliary measurement distribution of y_{t+lookahead} given x_{t + s/im}
   // when lookahead = 1 and s = im, this function should be the same as the dmeasure function.
   // the length of lookaheads and the length of measurements should equal.
 
   vector<double> dm(lookaheads.size(), 0.0); // log density of measurement
 
-  bool exCov = false; // should exact covariance matrix should be used? Otherwise, its diagonal matrix is used instead for simplicity.
-  if (exCov) {
+  if (diagCov) { // when the guide function uses a diagonal approximation to the covariance matrix
+    for (size_t pos = 0; pos < lookaheads.size(); pos++) {
+      for (int k=0; k<nvar; k++)
+	dm[pos] += npdf(meas[pos][k] - state[k], sqrt(exp(2*theta[1])+(lookaheads[pos]-(s+0.0)/im)*exp(2*theta[0])), true);
+    }
+  }
+  if (!diagCov) { // when the guide function usese the exact covariance matrix
     for (size_t pos = 0; pos < lookaheads.size(); pos++) {
       int lookahead_steps = lookaheads[pos]*im-s; // the number of lookahead steps 
       vector<vector<double> > L = Lmat[lookahead_steps];
@@ -137,11 +144,6 @@ vector<double> stf<double, double>::imdmeasure(int t, int s, vector<int> lookahe
       ltsolve(L,z,meas_minus_state);
       for (int k=0; k<nvar; k++)
 	dm[pos] += (npdf(z[k], 1.0, true) - log(L[k][k])); // multivariate normal density
-    }
-  } else {
-    for (size_t pos = 0; pos < lookaheads.size(); pos++) {
-      for (int k=0; k<nvar; k++)
-	dm[pos] += npdf(meas[pos][k] - state[k], sqrt(exp(2*theta[1])+(lookaheads[pos]-(s+0.0)/im)*exp(2*theta[0])), true);
     }
   }
   
@@ -154,18 +156,18 @@ vector<double> stf<double, double>::imdmeasure(int t, int s, vector<int> lookahe
 
 
 template<>
-double stf<double, double>::imdmeasure(int t, int s, int im, const vector<double>& state, const vector<double>& meas, const vector<double>& theta, bool logarithm) {
+double stf<double, double>::imdmeasure(int t, int s, int im, const vector<double>& state, const vector<double>& meas, const vector<double>& theta, vector<double>& forecast_var_1step, bool logarithm) {
   // the density of auxiliary measurement distribution of y_{t+1} given x_{t + s/im}
   // when s = im, this function should be the same as the dmeasure function.
 
   // set default values
   vector<int> lookaheads(1, 1);
   vector<vector<double> > observations(1, meas);
+  vector<vector<double> > forecast_var(1, forecast_var_1step);
 
-  vector<double> dm = imdmeasure(t, s, lookaheads, im, state, observations, theta, true);
+  vector<double> dm = imdmeasure(t, s, lookaheads, im, state, observations, theta, forecast_var, true);
 
   return (logarithm ? dm[0] : exp(dm[0]));
 }
-
 
 template class stf<double, double>;
