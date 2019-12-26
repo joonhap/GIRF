@@ -12,6 +12,8 @@
 
 #define SEED_INC_PER_IF_ITER 98663 // the mersenne twister rng seed increases by this amount at each iteration of IF2
 
+extern bool annealed; // whether the forecast likelihood estimates should be raised to fractional powers depending on the forecast length when evaluating the guide function. Can be defined in the code defining the model or in the code running experiments.
+
 template <typename state_T, typename obs_T>
 class stf {
  public:
@@ -68,6 +70,8 @@ class stf {
   void imrprocess(int t, int s, int im, const std::vector<state_T>& prev, std::vector<state_T>& next, const std::vector<double>& theta, double delta_t, std::mt19937& rng); // continuous time version
   std::vector<double> imdmeasure(int t, int s, std::vector<int> lookaheads, int im, const std::vector<state_T>& state, const std::vector<std::vector<obs_T> >& meas, const std::vector<double>& theta, bool logarithm); // imdmeasure with lookahead steps
   double imdmeasure(int t, int s, int im, const std::vector<state_T>& state, const std::vector<obs_T>& meas, const std::vector<double>& theta, bool logarithm); // default lookahead = 1
+  std::vector<double> imdmeasure(int t, int s, std::vector<int> lookaheads, int im, const std::vector<state_T>& state, const std::vector<std::vector<obs_T> >& meas, const std::vector<double>& theta, std::vector<std::vector<double> >& forecast_var, bool logarithm); // imdmeasure with lookahead steps, using stored forecast variability estimates
+  double imdmeasure(int t, int s, int im, const std::vector<state_T>& state, const std::vector<obs_T>& meas, const std::vector<double>& theta, std::vector<double>& forecast_var, bool logarithm); // default lookahead = 1, using stored forecast variability estimates
 
   //// set initial particle states using initial value parameter
   void set_initstates(std::vector<std::vector<std::vector<state_T> > >& initstates, const std::vector<std::vector<std::vector<state_T> > >& init_template, const std::vector<std::vector<std::vector<double> > >& thetaSwarm);

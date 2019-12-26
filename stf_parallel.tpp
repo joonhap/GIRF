@@ -7,9 +7,6 @@ using std::vector;
 using std::cout;
 using std::endl;
 
-void simulate_rprocess(double t_start, double t_end, const vector<int>& prev, vector<int>& next, const vector<double>& theta, double delta_t, std::mt19937& rng);
-void simulate_deterministic_process(double t_start, double t_end, const vector<double>& prev, vector<double>& next, const vector<double>& theta, double delta_t);
-
 template <typename T>
 void quicksort(vector<T>& v, int start, int end) {
   int i=start;
@@ -65,13 +62,12 @@ void stf<state_T, obs_T>::simulate(std::vector<state_T> state0, int initial_seed
 // iterated filtering (IF2)
 template <typename state_T, typename obs_T>
   void stf<state_T, obs_T>::imfilter(const std::vector<std::vector<std::vector<state_T> > >& initstates, int im, int R, int J, std::vector<std::vector<double> >& lestimate, std::vector<std::vector<double> >& state_mean, std::vector<std::vector<state_T> >& q10, std::vector<std::vector<state_T> >& q50, std::vector<std::vector<state_T> >& q90, double (*f1)(double), std::vector<std::vector<double> >& f1_mean, std::vector<std::vector<std::vector<double> > >& ESS, const std::vector<std::vector<std::vector<double> > >& initThetaSwarm, std::vector<double> init_perturb_size, int M, std::function<double (int)> coolschedule, std::vector<std::vector<std::vector<double> > >& thetaTrajectory, std::vector<std::vector<std::vector<double> > >& finalThetaSwarm, bool weighted_interaction, int max_lookahead, std::function<bool (int, int)> island_interact_condition, int initial_seed) {
-  // initstates: initial states; im: the number of subdivisions of a time interval; R: the number of repititions of intermediary filtering at each time interval; J: the number of particles used in each intermediary filtering; lestimate: log likelihood esitmate for each time interval; state_mean: state estimate; q10, q50, q90: quantiles of state variable, f1: function of state to be estimated; f1_mean: estimate of f1 of state; ESS: effective sample size at each resampling stage; initThetaSwarm: initial parameter vectors for IF2; init_perturb_size: initial parameter perturbation size for IF2; M: number of IF2 iterations; coolschedule: function specifying how fast perturbation size decreases; thetaTrajectory: the trajectory of the average of parameter estimates over IF2; finalThetaSwarm: final parameter locations (for subsequently continued IF2 iterations), weighted_interaction: if true, duplicate or discard islands according to their weights (cf. del moral et al's island particle filter.); max_lookahead: maximum number of observations to look ahead for the computation of intermediary target weight function; initial_seed: seed value for rng initialization; island_interact_condition: a function returning true/false whether the island interaction should occur at the current time point
-
-  bool ann = false; // should annealed predictive likelihood be used?
+  // initstates: initial states; im: the number of subdivisions of a time interval; R: the number of repititions of intermediary filtering at each time interval; J: the number of particles used in each intermediary filtering; lestimate: log likelihood esitmate for each time interval; state_mean: state estimate; q10, q50, q90: quantiles of state variable, f1: function of state to be estimated; f1_mean: estimate of f1 of state; ESS: effective sample size at each resampling stage; initThetaSwarm: initial parameter vectors for IF2; init_perturb_size: initial parameter perturbation size for IF2; M: number of IF2 iterations; coolschedule: function specifying how fast perturbation size decreases; thetaTrajectory: the trajectory of the average of parameter estimates over IF2; finalThetaSwarm: final parameter locations (for subsequently continued IF2 iterations), weighted_interaction: if true, duplicate or discard islands according to their weights (cf. del moral et al's island particle filter.); max_lookahead: maximum number of observations to look ahead for the computation of the guide function; initial_seed: seed value for rng initialization; island_interact_condition: a function returning true/false whether the island interaction should occur at the current time point
 
   std::vector<std::vector<std::vector<state_T> > > prev; // 'prev' are the collection of all monte carlo samples at each time step (R*J*K)
   std::vector<std::vector<std::vector<double> > > prev_theta = initThetaSwarm; // collection of parameter vectors. (R*J*param_dim)
   std::vector<std::vector<double> > oldltilde_storage(R); // global storage of oldltilde (see below)
+  vector<vector<vector<vector<double> > > > forecast_var(R, vector<vector<vector<double> > >(J)); // global storage of forecast variances
 
   lestimate.resize(M);
   thetaTrajectory.resize(M);
@@ -106,18 +102,6 @@ template <typename state_T, typename obs_T>
 
     std::vector<double> island_logweights(R, 0.0);
 
-
-
-
-/*
-    std::ofstream imfile;
-    std::string imfilename = "im_states.txt";
-    imfile.open(imfilename);
-*/
-
-
-
-
 #pragma omp parallel num_threads(R)
     {
       int i = omp_get_thread_num();
@@ -141,37 +125,15 @@ template <typename state_T, typename obs_T>
             oldltilde[j] -= dmeasure(t, prev_loc[j], obs[t-1], prev_theta_loc[j], true);
         }
 
-/*
-        // compute the pseudo-predictive likelihood from the last step, i.e., the denominator of weight for s=0.
-        std::fill(oldltilde.begin(), oldltilde.end(), 0.0);
-        if (t > 0) { // for the very first time point, there is no previous ltilde.
-          vector<int> lookaheads; // the lookahead steps to be considered
-          vector<vector<obs_T> > observations; // corresponding observation vectors
-          for (int lookahead = 2; lookahead <= std::min(max_lookahead, ntimes-(t-1)); lookahead++) { 
-	    // the current time point will not be included in the denominator
-            lookaheads.push_back(lookahead);
-	    observations.push_back(obs[(t-1)+lookahead-1]);
-          }
-
-          for (int j=0; j<J; j++) {
-            vector<double> pseudo_predictive_loglikelihoods = imdmeasure(t-1, im, lookaheads, im, prev_loc[j], observations, prev_theta_loc[j], true);
-            for (size_t pos = 0; pos < lookaheads.size(); pos++) {
-	      if (ann) { // if annealed predicted likelihood is used
-                oldltilde[j] += (pseudo_predictive_loglikelihoods[pos] * (1.0 - (lookaheads[pos]-(im+0.0)/im) / std::min(max_lookahead, (t-1)+lookaheads[pos])));
-	      } else { // if non-annealed predicted likelihood is used
-                oldltilde[j] += pseudo_predictive_loglikelihoods[pos];
-              }
-            }
-	  }
-        }
-*/
-        // lookahead steps and the corresponding observations for weight computation
+        // lookahead steps and the corresponding observations for computing the guide function (imdmeasure)
         vector<int> lookaheads;
         vector<vector<obs_T> > observations;
         for (int lookahead = 1; lookahead <= std::min(max_lookahead, ntimes-t); lookahead++) {
           lookaheads.push_back(lookahead);
           observations.push_back(obs[t+lookahead-1]);
         }
+
+        vector<vector<vector<double> > > forecast_var_loc(J, vector<vector<double> >(lookaheads.size())); // estimated variability in the time-forward projections (forecasts). Used for computing the guide function (imdmeasure)
 
         for (int s=0; s<im; s++) {
           std::vector<std::vector<state_T> > x(J, std::vector<state_T>(nvar)); // proposed particles at this intermediary step
@@ -187,11 +149,11 @@ template <typename state_T, typename obs_T>
 	    imrprocess(t, s, im, prev_loc[j], x[j], theta_loc[j], rng);
 
 	    // evaluate fitness to the next few observations
-            vector<double> pseudo_predictive_loglikelihoods = imdmeasure(t, s+1, lookaheads, im, x[j], observations, theta_loc[j], true);
+            vector<double> pseudo_predictive_loglikelihoods = imdmeasure(t, s+1, lookaheads, im, x[j], observations, theta_loc[j], forecast_var_loc[j], true);
 
             for (size_t pos = 0; pos < lookaheads.size(); pos++) {
-	      if (ann) { // if annealed predictive likelihood is used
-                ltilde[j] += (pseudo_predictive_loglikelihoods[pos] * (1.0 - (lookaheads[pos]-(s+1.0)/im) / std::min(max_lookahead, t+lookaheads[pos])));
+	      if (annealed) { // if annealed predictive likelihood is used
+                ltilde[j] += (pseudo_predictive_loglikelihoods[pos] * (1.0 - (lookaheads[pos]-(s+1.0)/im) / std::max(2, std::min(max_lookahead, t+lookaheads[pos]))));
               } else { // if non-annealed predictive likelihood is used
                 ltilde[j] += pseudo_predictive_loglikelihoods[pos];
 	      }
@@ -249,6 +211,7 @@ template <typename state_T, typename obs_T>
 	      logw[j] -= logsum_w;
 
             // resampling
+	    vector<vector<vector<double> > > forecast_var_loc_storage = forecast_var_loc;
  	    char resampling_mode = 's'; // 's': systematic resampling, 'm': multinomial resampling
 	    if (resampling_mode == 's') {
 	      double p1 = uniform_loc(rng) / J;
@@ -260,6 +223,7 @@ template <typename state_T, typename obs_T>
 	        prev_loc[j] = x[j1];
 	        prev_theta_loc[j] = theta_loc[j1];
 	        oldltilde[j] = ltilde[j1];
+		forecast_var_loc[j] = forecast_var_loc_storage[j1];
 	        p1 += 1.0 / J;
 	      }
 	    } else if (resampling_mode == 'm') {
@@ -272,6 +236,7 @@ template <typename state_T, typename obs_T>
 	        prev_loc[j] = x[j1];
 	        prev_theta_loc[j] = theta_loc[j1];
 	        oldltilde[j] = ltilde[j1];
+		forecast_var_loc[j] = forecast_var_loc_storage[j1];
 	      }
             }
 
@@ -279,27 +244,11 @@ template <typename state_T, typename obs_T>
             cumulative_l += (any_parent_zero_weight ? 1.0/0.0 : (logsum_w - log(J))); 
 
           } else { // when all particles have zero weight, move along with existing particles.
-	    cout << " all particle have zero weight." << endl;
+	    cout << " All particle have zero weight." << "  t: " << t << " s: " << s << " particle island: " << i << endl;
 	    prev_loc = x;
 	    prev_theta_loc = theta_loc;
 	    effSS = 0.0/0.0;
 	  }
-
-
-
-
-
-
-/*
-          for (int jj=0; jj<J; jj++) {
-	    for (size_t dd=0; dd<x[jj].size(); dd++)
-              imfile << prev_loc[jj][dd] << " ";
-	    imfile << endl;
-          }
-*/
-
-
-
 
 	  if (m == (M-1)) { ESS_loc[t][s] = effSS; }
 
@@ -312,6 +261,7 @@ template <typename state_T, typename obs_T>
 	    prev_theta[i] = prev_theta_loc; // copy local parameter vectors into the central storage
             if (!any_survival) oldltilde = vector<double>(J, -1.0/0.0);
 	    oldltilde_storage[i] = oldltilde; // copy local oldltilde into the central storage
+	    forecast_var[i] = forecast_var_loc; // copy forecast variance into the central storage
   	    island_logweights[i] = (any_survival ? cumulative_l : -1.0/0.0); // copy local cumulative log likelihood estimate to the central storage
 
 #pragma omp barrier
@@ -378,12 +328,14 @@ template <typename state_T, typename obs_T>
 	      std::vector<std::vector<std::vector<state_T> > > prev_copy = prev;
 	      std::vector<std::vector<std::vector<double> > > prev_theta_copy = prev_theta;
 	      std::vector<std::vector<double> > oldltilde_storage_copy = oldltilde_storage;
+	      vector<vector<vector<vector<double> > > > forecast_var_copy = forecast_var;
 	      for (int r=0; r<R; r++)
 		for (int j=0; j<J; j++) {
 		  int id = pid[r*J+j];
 		  prev[r][j] = prev_copy[id/J][id%J];
 		  prev_theta[r][j] = prev_theta_copy[id/J][id%J];
 		  oldltilde_storage[r][j] = oldltilde_storage_copy[id/J][id%J];
+		  forecast_var[r][j] = forecast_var_copy[id/J][id%J];
 		}
 
               // compute average theta value
@@ -397,7 +349,6 @@ template <typename state_T, typename obs_T>
 	          avg_theta[param_dim] /= double(R*J);
 		thetaTrajectory[m][t] = avg_theta;
               }
-
 
               // end the iteration if there are too many nan or -inf's.
               int no_fin = 0;
@@ -413,7 +364,8 @@ template <typename state_T, typename obs_T>
 	    prev_loc = prev[i];
 	    prev_theta_loc = prev_theta[i];
 	    oldltilde = oldltilde_storage[i];
-
+	    forecast_var_loc = forecast_var[i];
+	    
             // reset local cumulative likelihood estimates
 	    cumulative_l = 0.0;
 	    
