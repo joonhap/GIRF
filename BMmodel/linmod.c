@@ -6,7 +6,7 @@ using std::vector;
 using std::cout;
 using std::endl;
 
-bool annealed = false; // the forecast likelihoods are NOT raised to fractional powers depending on the forecast time length
+//bool annealed = false; // the forecast likelihoods are NOT raised to fractional powers depending on the forecast time length : THIS LINE IS MOVED TO run_linmod_im.c IN EACH DATE SPECIFIC DIRECTORY.
 
 double ncdf(double value) { // normal cdf
   return 0.5 * std::erfc(-value * M_SQRT1_2);
@@ -134,7 +134,7 @@ vector<double> stf<double, double>::imdmeasure(int t, int s, vector<int> lookahe
 	dm[pos] += npdf(meas[pos][k] - state[k], sqrt(exp(2*theta[1])+(lookaheads[pos]-(s+0.0)/im)*exp(2*theta[0])), true);
     }
   }
-  if (!diagCov) { // when the guide function usese the exact covariance matrix
+  if (!diagCov) { // when the guide function uses the exact covariance matrix
     for (size_t pos = 0; pos < lookaheads.size(); pos++) {
       int lookahead_steps = lookaheads[pos]*im-s; // the number of lookahead steps 
       vector<vector<double> > L = Lmat[lookahead_steps];

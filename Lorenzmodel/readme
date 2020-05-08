@@ -1,0 +1,32 @@
+runs the EnKF for d=50 dimensional Lorenz 96 with observation time interval = 0.5 and process noise = 1.0.
+The EnKF can be run by using the pomp enkf() or the direct code (EnKF.R file from 191126/).
+
+
+ALSO: changes Lorenzmod such that the forecast likelihoods can be estimated using the sample quantiles of forward simulations (instead of the sample variance of them)
+The variable 'forecast_var' is now to be read as 'forecast_variability', and can be used to store sample quantile values.
+For this reason, the dimension of the array 'forecast_var' increases by one (various quantile values have to be stored). Corresponding changes to stf_parallel.tpp, stf_parallel.h were made. Also changes to be made to measlesmod and linmod.
+
+results: (d=50, obs_time_interval=0.5, nobs=200, max_lookahead=2, sample_quantiles--> used 8 quantile values out of forty simulations) (filenames without dtObs correspond to the case where the observation time interval = 0.5)
+   R    J n        ll
+1  5 2000 0 -1.954700
+2  5 2000 1 -1.957779
+3  5 2000 2 -1.956207
+4  5 2000 3 -1.959354
+5  5 2000 4 -1.955487
+6  1 2000 0 -1.970056
+7  1 2000 1 -1.970188
+8  1 2000 2 -1.970040
+9  1 2000 3 -1.971126
+10 1 2000 4 -1.968058
+11 1  400 0 -2.025445
+12 1  400 1 -2.010866
+13 1  400 2 -2.018612
+14 1  400 3 -2.012122
+15 1  400 4 -2.023560
+
+--> For d=50 and observation time interval = 0.5, the likelihood estimates by GIRF were higher than those by the EnKF. (see plots in figures/ directory)
+
+
+
+EnKF: local implementation with variance inflation -- EnKF_local_varinfl.R
+--> did not improve the EnKF likelihood estimates

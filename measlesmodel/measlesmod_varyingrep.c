@@ -11,6 +11,8 @@ using std::vector;
 using std::cout;
 using std::endl;
 
+//// NOTE: THIS IS A DEPRECATED VERSION. ////
+
 double dnpmf(int value, double mean, double sd) { // discrete normal pmf
   if (value > 0.5) {
     if (value < mean)
@@ -575,7 +577,7 @@ vector<double> stf<int, int>::imdmeasure(int t, int s, vector<int> lookaheads, i
   // the density of auxiliary measurement distribution of y_{t+lookahead} given x_{t+s/im}
   // we use projection of state to t+1 to compute pseudo-predictive likelihood
   // when lookahead = 1 and s = im, this function should be the same as the dmeasure function.
-  // the length of lookaheads and the lengthe measurements should equal.
+  // the length of lookaheads and the length of measurements should be equal.
 
   const int ncity = state.size() / 5; // number of cities being analyzed 
   const double gen = exp(theta[4]); // generation cycle (1/nu_EI+1/nu_IR, log-transformed)

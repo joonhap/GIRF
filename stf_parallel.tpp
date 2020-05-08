@@ -67,7 +67,7 @@ template <typename state_T, typename obs_T>
   std::vector<std::vector<std::vector<state_T> > > prev; // 'prev' are the collection of all monte carlo samples at each time step (R*J*K)
   std::vector<std::vector<std::vector<double> > > prev_theta = initThetaSwarm; // collection of parameter vectors. (R*J*param_dim)
   std::vector<std::vector<double> > oldltilde_storage(R); // global storage of oldltilde (see below)
-  vector<vector<vector<vector<double> > > > forecast_var(R, vector<vector<vector<double> > >(J)); // global storage of forecast variances
+  vector<vector<vector<vector<vector<double> > > > > forecast_var(R, vector<vector<vector<vector<double> > > >(J)); // global storage of forecast variability measures
 
   lestimate.resize(M);
   thetaTrajectory.resize(M);
@@ -133,14 +133,14 @@ template <typename state_T, typename obs_T>
           observations.push_back(obs[t+lookahead-1]);
         }
 
-        vector<vector<vector<double> > > forecast_var_loc(J, vector<vector<double> >(lookaheads.size())); // estimated variability in the time-forward projections (forecasts). Used for computing the guide function (imdmeasure)
+        vector<vector<vector<vector<double> > > > forecast_var_loc(J, vector<vector<vector<double> > >(lookaheads.size())); // estimated variability in the time-forward projections (forecasts). Used for computing the guide function (imdmeasure)
 
         for (int s=0; s<im; s++) {
           std::vector<std::vector<state_T> > x(J, std::vector<state_T>(nvar)); // proposed particles at this intermediary step
 	  std::vector<std::vector<double> > theta_loc(J, std::vector<double>(theta.size())); // perturbed parameter vectors.
 	  std::vector<double> ltilde(J, 0.0); // estimate of log likelihood of next y given current (intermediary) x under auxiliary measurement distribution
           std::vector<double> logw(J, 0.0); // weights corresponding to the pairs of proposed intermediary particles and their parents.
-
+					    
 	  for(int j=0; j<J; j++) {
 	    theta_loc[j] = prev_theta_loc[j];
 	    for(std::size_t param_dim = 0; param_dim < theta.size()-pos_ivp.size(); param_dim++)
@@ -150,7 +150,6 @@ template <typename state_T, typename obs_T>
 
 	    // evaluate fitness to the next few observations
             vector<double> pseudo_predictive_loglikelihoods = imdmeasure(t, s+1, lookaheads, im, x[j], observations, theta_loc[j], forecast_var_loc[j], true);
-
             for (size_t pos = 0; pos < lookaheads.size(); pos++) {
 	      if (annealed) { // if annealed predictive likelihood is used
                 ltilde[j] += (pseudo_predictive_loglikelihoods[pos] * (1.0 - (lookaheads[pos]-(s+1.0)/im) / std::max(2, std::min(max_lookahead, t+lookaheads[pos]))));
@@ -211,7 +210,7 @@ template <typename state_T, typename obs_T>
 	      logw[j] -= logsum_w;
 
             // resampling
-	    vector<vector<vector<double> > > forecast_var_loc_storage = forecast_var_loc;
+	    vector<vector<vector<vector<double> > > > forecast_var_loc_storage = forecast_var_loc;
  	    char resampling_mode = 's'; // 's': systematic resampling, 'm': multinomial resampling
 	    if (resampling_mode == 's') {
 	      double p1 = uniform_loc(rng) / J;
@@ -261,7 +260,7 @@ template <typename state_T, typename obs_T>
 	    prev_theta[i] = prev_theta_loc; // copy local parameter vectors into the central storage
             if (!any_survival) oldltilde = vector<double>(J, -1.0/0.0);
 	    oldltilde_storage[i] = oldltilde; // copy local oldltilde into the central storage
-	    forecast_var[i] = forecast_var_loc; // copy forecast variance into the central storage
+	    forecast_var[i] = forecast_var_loc; // copy forecast variability measures into the central storage
   	    island_logweights[i] = (any_survival ? cumulative_l : -1.0/0.0); // copy local cumulative log likelihood estimate to the central storage
 
 #pragma omp barrier
@@ -328,7 +327,7 @@ template <typename state_T, typename obs_T>
 	      std::vector<std::vector<std::vector<state_T> > > prev_copy = prev;
 	      std::vector<std::vector<std::vector<double> > > prev_theta_copy = prev_theta;
 	      std::vector<std::vector<double> > oldltilde_storage_copy = oldltilde_storage;
-	      vector<vector<vector<vector<double> > > > forecast_var_copy = forecast_var;
+	      vector<vector<vector<vector<vector<double> > > > > forecast_var_copy = forecast_var;
 	      for (int r=0; r<R; r++)
 		for (int j=0; j<J; j++) {
 		  int id = pid[r*J+j];

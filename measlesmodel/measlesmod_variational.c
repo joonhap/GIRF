@@ -11,14 +11,9 @@ using std::vector;
 using std::cout;
 using std::endl;
 
-// this version (measlesmod_momentmatching.c) computes the guide function by adding the forecast variability to the variance of the measurement process.
-// The forecast variability is estimated by simulating forward the rprocess multiple times and computing the sample statistics (e.g., inter-quartile range or variance).
-
-bool annealed = true; // the forecast likelihoods are raised to fractional powers depending on the forecast time length
-
-// use city-specific measles case reporting ratio estimated by dividing the total number of reported cases in year 1948--64 by the total number of births in year 1944-1960.
-double repdata[] =   {0.52, 0.56, 0.69, 0.62, 0.64, 0.59, 0.58, 0.62, 0.58, 0.69, 0.69, 0.61, 0.64, 0.59, 0.61, 0.68, 0.61, 0.51, 0.51, 0.58, 0.61, 0.59, 0.68, 0.59, 0.70, 0.64, 0.57, 0.56, 0.50, 0.44, 0.67, 0.59, 0.77, 0.61, 0.51, 0.54, 0.68, 0.55, 0.69, 0.55};
-
+// this version (measlesmod_variational.c) uses variational-inference-like method to compute the guide function.
+// Specifically, this version estimates the marginal likelihoods of data corresponding to one city using SMC using only the data for that one city.
+// The guide function is taken to be the product of marginal likelihood estimates.
 
 double dnpmf(int value, double mean, double sd) { // discrete normal pmf
   if (value > 0.5) {
@@ -72,32 +67,21 @@ double hol_eff(int d, double hol_coeff) { // compute holiday effect coefficient
 // set initial state based on the initial value parameters
 template <typename state_T, typename obs_T>
   void stf<state_T, obs_T>::set_initstates(vector<vector<vector<state_T> > >& initstates, const vector<vector<vector<state_T> > >& init_template, const vector<vector<vector<double> > >& thetaSwarm) {
-  // the initial value parameter vector defines the proportion of each compartment at t=0
-  // as a precaution, check if the length of the first dimension of init_tempate and thetaSwarm match.
+  // the initial value parameter vector (length 1) defines the proportion of the susceptible population at t=0
+  // the length of the first dimension of init_tempate and thetaSwarm should match.
   if (init_template.size() != thetaSwarm.size()) {
     cout << "Error in initializing particle states: the length of init_template and that of thetaSwarm do not match." << endl;
     exit(1);
   }
   initstates = init_template;
-
-  int R = initstates.size();
-  int J = initstates[0].size();
-  int ncity = initstates[0][0].size()/5;
-  for (int i=0; i<R; i++)
-    for (int j=0; j<J; j++) 
-      for (int k=0; k<ncity; k++) {
-	initstates[i][j][5*k+0] = initstates[i][j][5*k+4] / (1.0+exp(-thetaSwarm[i][j][pos_ivp[3*k+0]]));
-	initstates[i][j][5*k+1] = initstates[i][j][5*k+4] / (1.0+exp(-thetaSwarm[i][j][pos_ivp[3*k+1]]));
-	initstates[i][j][5*k+2] = initstates[i][j][5*k+4] / (1.0+exp(-thetaSwarm[i][j][pos_ivp[3*k+2]]));
-      }
 }
 
 
 // // // deterministic skeleton // // //
 void simulate_deterministic_process(double t_start, double t_end, const vector<double>& prev, vector<double>& next, const vector<double>& theta, double delta_t) {
-  // process simulator for deterministic skeleton
-  // prev, next: state vector. Length 5*k. Consists of k copies of (S,E,I,weekly_I_to_R_transition,P). P (population) is (piecewise) constant.
-  // weekly_I_to_R_transition is the weekly aggregate transition from I to R.
+  // process simulator for either deterministic skeleton or rprocess (as specified by the parameter 'deterministic')
+  // prev, next: state vector. Length 5*k. Consists of k copies of (S,E,I,I_to_R_transition,P). P (population) is (piecewise) constant.
+  // I_to_R_transition is the aggregate transitions from I to R for each observation time interval.
   // t: week of a year, delta_t: euler increment step. This rprocess operates between time t and t+1.
 
   const int ncity = prev.size() / 5; // number of cities being analyzed
@@ -126,8 +110,8 @@ void simulate_deterministic_process(double t_start, double t_end, const vector<d
     pv[n] = prev[n];
   vector<double> nx = pv;
 
-  const double tol=1e-5;
-  const double dpu=365.25/26.0; // days per time unit interval
+  const double tol=1e-6;
+  const double oti=14.0; // observation time interval in unit of days (14.0 means biweekly data)
 
   for(double time = t_start; time < t_end-tol; time += delta_t) {
     double t_inc = delta_t; // time increment for this step
@@ -135,33 +119,33 @@ void simulate_deterministic_process(double t_start, double t_end, const vector<d
       t_inc = t_end - time; // if the last time increment is less than delta_t, make it such that the final time equals t_end
     }
 
-    // initialize biweekly total I to R transitions (if an integer is in the interval [time, time+t_inc), set the biweekly sum to zero.)
+    // initialize total I to R transitions per observation time interval (if an integer is in the interval [time, time+t_inc), set the cumulative sum to zero.)
     if (int(time-tol) < int(time+t_inc-tol)) {
       for (int k=0; k < ncity; k++)
 	pv[5*k+3] = 0; 
     }
 
-    int year = int(time * dpu / 365.25) + startyear; 
-    int day = int(time * dpu + tol - (year-startyear)*365.25);
+    int year = int(time * oti / 365.25) + startyear; 
+    int day = int(time * oti + tol - (year-startyear)*365.25);
 
     // change population size at the start of year
-    if (year < int((time+t_inc) * dpu / 365.25) + startyear) {
+    if (year < int((time+t_inc) * oti / 365.25) + startyear) {
       // if population data is not found for the new year, exit the program
-      if ((int((time+t_inc) * dpu / 365.25) + startyear < pop_data_first_year) || (int((time+t_inc) * dpu / 365.25) + startyear > pop_data_last_year)) {
-	cout << "Population data not found for the new year (Population data needed for year " << (int((time+t_inc) * dpu / 365.25) + startyear) << ".) Exit the program." << endl;
+      if ((int((time+t_inc) * oti / 365.25) + startyear < pop_data_first_year) || (int((time+t_inc) * oti / 365.25) + startyear > pop_data_last_year)) {
+	cout << "Population data not found for the new year (Population data needed for year " << (int((time+t_inc) * oti / 365.25) + startyear) << ".) Exit the program." << endl;
 	exit(1);
       }
       for (int k=0; k<ncity; k++)
-	pv[5*k+4] = pop_data[int((time+t_inc) * dpu / 365.25) + startyear-pop_data_first_year][cityindex[k]];
+	pv[5*k+4] = pop_data[int((time+t_inc) * oti / 365.25) + startyear-pop_data_first_year][cityindex[k]];
     }
     
     // recruit incremental susceptibles
-    double day_double = time*dpu - int(time*dpu/365.25) * 365.25;
+    double day_double = time*oti - int(time*oti/365.25) * 365.25; // days since the start of the year
     for (int k=0; k<ncity; k++) 
-      pv[5*k] += (int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * (day_double+t_inc*dpu) / 365.25) - int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * day_double / 365.25));
+      pv[5*k] += (int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * (day_double+t_inc*oti) / 365.25) - int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * day_double / 365.25));
 
     // recruit susceptibles on school start day
-    if((day < schoolstart) & (schoolstart <= int((time+t_inc)*dpu + tol - (year-startyear)*365.25))) { // make sure not to recruit susceptibles multiples time a day
+    if((day < schoolstart) & (schoolstart <= int((time+t_inc)*oti + tol - (year-startyear)*365.25))) { // make sure not to recruit susceptibles multiples time a day
       // if birth data is not found for the cohort, exit the program
       if ((year-entryage < birth_data_first_year) || (year-entryage > birth_data_last_year)) {
 	cout << "Birth data not found for the current year (Birth data needed for year " << (year - entryage) << ".) Exit the program." << endl;
@@ -195,12 +179,12 @@ void simulate_deterministic_process(double t_start, double t_end, const vector<d
       }
       nu_SE *= (beta_s * hol_eff(day, hol_coeff));
       
-      double gamma_SE = t_inc;
-      double gamma_SD = t_inc;
-      double gamma_EI = t_inc;
-      double gamma_ED = t_inc;
-      double gamma_IR = t_inc;
-      double gamma_ID = t_inc;
+      double gamma_SE = t_inc * oti / 7.0;
+      double gamma_SD = t_inc * oti / 7.0;
+      double gamma_EI = t_inc * oti / 7.0;
+      double gamma_ED = t_inc * oti / 7.0;
+      double gamma_IR = t_inc * oti / 7.0;
+      double gamma_ID = t_inc * oti / 7.0;
       
       double outrate_S = nu_SE*gamma_SE + mu*gamma_SD;
       double p_SE = nu_SE*gamma_SE / outrate_S * (1-std::exp(-outrate_S));
@@ -235,9 +219,9 @@ void simulate_deterministic_process(double t_start, double t_end, const vector<d
 // // // rprocess // // //
 
 void simulate_rprocess(double t_start, double t_end, const vector<int>& prev, vector<int>& next, const vector<double>& theta, double delta_t, std::mt19937& rng) {
-  // process simulator for rprocess
-  // prev, next: state vector. Length 5*k. Consists of k copies of (S,E,I,weekly_I_to_R_transition,P). P (population) is (piecewise) constant.
-  // weekly_I_to_R_transition is the weekly aggregate transition from I to R.
+  // process simulator for either deterministic skeleton or rprocess (as specified by the parameter 'deterministic')
+  // prev, next: state vector. Length 5*k. Consists of k copies of (S,E,I,I_to_R_transition,P). P (population) is (piecewise) constant.
+  // I_to_R_transition is the aggregate transitions from I to R for each observation time interval.
   // t: week of a year, delta_t: euler increment step. This rprocess operates between time t and t+1.
 
   const int ncity = prev.size() / 5; // number of cities being analyzed
@@ -264,8 +248,8 @@ void simulate_rprocess(double t_start, double t_end, const vector<int>& prev, ve
   vector<int> pv = prev; // starting state of the infinitesimal interval
   vector<int> nx = pv; // end state of the infinitesimal interval
 
-  const double tol=1e-5;
-  const double dpu=365.25/26.0; // days in a biweek
+  const double tol=1e-6;
+  const double oti=14.0; // observation time interval in unit of days (14.0 means biweekly data)
 
   for(double time = t_start; time < t_end-tol; time += delta_t) {
     double t_inc = delta_t; // time increment for this step
@@ -273,35 +257,35 @@ void simulate_rprocess(double t_start, double t_end, const vector<int>& prev, ve
       t_inc = t_end - time; // if the last time increment is less than delta_t, make it such that the final time equals t_end.
     }
 
-    // initialize weekly total I to R transitions (if an integer is in the interval [time, time+t_inc), set the weekly sum to zero.)
+    // initialize total I to R transitions per observation time interval (if an integer is in the interval [time, time+t_inc), set the cumulative sum to zero.)
     if (int(time-tol) < int(time+t_inc-tol)) {
       for (int k=0; k < ncity; k++)
 	pv[5*k+3] = 0; 
     }
 
-    int year = int(time * dpu / 365.25) + startyear; 
-    int day = int(time * dpu + tol - (year-startyear)*365.25);
+    int year = int(time * oti / 365.25) + startyear; 
+    int day = int(time * oti + tol - (year-startyear)*365.25);
 
     // change population size at the start of year
-    if (year < int((time+t_inc) * dpu / 365.25) + startyear) {
+    if (year < int((time+t_inc) * oti / 365.25) + startyear) {
       // if population data is not found for the new year, exit the program
-      if ((int((time+t_inc) * dpu / 365.25) + startyear < pop_data_first_year) || (int((time+t_inc) * dpu / 365.25) + startyear > pop_data_last_year)) {
-	cout << "Population data not found for the new year (Population data needed for year " << (int((time+t_inc) * dpu / 365.25) + startyear) << ".) Exit the program." << endl;
+      if ((int((time+t_inc) * oti / 365.25) + startyear < pop_data_first_year) || (int((time+t_inc) * oti / 365.25) + startyear > pop_data_last_year)) {
+	cout << "Population data not found for the new year (Population data needed for year " << (int((time+t_inc) * oti / 365.25) + startyear) << ".) Exit the program." << endl;
 	exit(1);
       }
       for (int k=0; k<ncity; k++)
-	pv[5*k+4] = pop_data[int((time+t_inc) * dpu / 365.25) + startyear-pop_data_first_year][cityindex[k]]; 
+	pv[5*k+4] = pop_data[int((time+t_inc) * oti / 365.25) + startyear-pop_data_first_year][cityindex[k]]; 
     }
 
     // recruit incremental susceptibles
-    double day_double = time*dpu - int(time*dpu/365.25) * 365.25;
+    double day_double = time*oti - int(time*oti/365.25) * 365.25; // days since the start of the year
 
     for (int k=0; k<ncity; k++) {
-      pv[5*k] += (int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * (day_double+t_inc*dpu) / 365.25) - int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * day_double / 365.25));
+      pv[5*k] += (int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * (day_double+t_inc*oti) / 365.25) - int((1.0-cohort_entry) * birth_data[year-entryage-birth_data_first_year][cityindex[k]] * day_double / 365.25));
     }
 
     // recruit susceptibles on school start day
-    if((day < schoolstart) & (schoolstart <= int((time+t_inc)*dpu + tol - (year-startyear)*365.25))) { // make sure not to recruit susceptibles multiples time a day
+    if((day < schoolstart) & (schoolstart <= int((time+t_inc)*oti + tol - (year-startyear)*365.25))) { // make sure not to recruit susceptibles multiples time a day
       // if birth data is not found for the cohort, exit the program
       if ((year-entryage < birth_data_first_year) || (year-entryage > birth_data_last_year)) {
 	cout << "Birth data not found for the current year (Birth data needed for year " << (year - entryage) << ".) Exit the program." << endl;
@@ -335,7 +319,7 @@ void simulate_rprocess(double t_start, double t_end, const vector<int>& prev, ve
       }
       nu_SE *= (beta_s * hol_eff(day, hol_coeff));
       
-      std::gamma_distribution<double> gamma(t_inc/sigma2, sigma2);
+      std::gamma_distribution<double> gamma(t_inc*oti/7.0/sigma2, sigma2);
       double gamma_SE = gamma(rng); // gamma variable for S to E transition
       double gamma_SD = gamma(rng); // gamma variable for S to D (death) transition
       double gamma_EI = gamma(rng); // gamma variable for E to I transition
@@ -403,17 +387,13 @@ void stf<int, int>::rprocess(int t, const vector<int>& prev, vector<int>& next, 
 template<>
 void stf<int, int>::rmeasure(int t, const std::vector<int>& state, std::vector<int>& meas, const std::vector<double>& theta, std::mt19937& rng) {
   const int ncity = state.size() / 5; // number of cities being analyzed
-  vector<double> rep_all; // reporting probability for all cities in the data file
-  rep_all.assign(repdata, repdata+NCITY);
-  vector<double> rep(ncity); // reporting probabilities for the cities being analyzed
-  for (int k = 0; k < ncity; k++)
-    rep[k] = rep_all[cityindex[k]];
+  const double rep = 1.0/(1.0+exp(-theta[7])); // reporting probability
   const double repOD = exp(theta[8]); // reporting overdispersion
 
   std::normal_distribution<double> normal(0.0, 1.0);
 
   for (int k = 0; k < ncity; k++) {
-    meas[k] = int(state[5*k+3]*rep[cityindex[k]] + normal(rng) * std::sqrt(state[5*k+3]*rep[cityindex[k]]*(1-rep[cityindex[k]]) + repOD*repOD*state[5*k+3]*state[5*k+3]*rep[cityindex[k]]*rep[cityindex[k]] + 1) + 0.5);
+    meas[k] = int(state[5*k+3]*rep + normal(rng) * std::sqrt(state[5*k+3]*rep*(1-rep) + repOD*repOD*state[5*k+3]*state[5*k+3]*rep*rep + 1) + 0.5);
     if (meas[k] < 0) meas[k] = 0;
   }
 }
@@ -424,17 +404,13 @@ void stf<int, int>::rmeasure(int t, const std::vector<int>& state, std::vector<i
 template<>
 double stf<int, int>::dmeasure(int t, const std::vector<int>& state, const std::vector<int>& meas, const std::vector<double>& theta, bool logarithm) {
   const int ncity = state.size() / 5; // number of cities being analyzed
-  vector<double> rep_all; // reporting probability for all cities in the data file
-  rep_all.assign(repdata, repdata+NCITY);
-  vector<double> rep(ncity); // reporting probabilities for the cities being analyzed
-  for (int k = 0; k < ncity; k++)
-    rep[k] = rep_all[cityindex[k]];
+  const double rep = 1.0/(1.0+exp(-theta[7])); // reporting probability
   const double repOD = exp(theta[8]); // reporting overdispersion
 
   double dm = 0.0; // log density of measurement
 
   for (int k = 0; k < ncity; k++) {
-    dm += log(dnpmf(meas[k], state[5*k+3] * rep[k], std::sqrt(state[5*k+3]*rep[k]*(1-rep[k]) + repOD*repOD*state[5*k+3]*state[5*k+3]*rep[k]*rep[k] + 1)));
+    dm += log(dnpmf(meas[k], state[5*k+3] * rep, std::sqrt(state[5*k+3]*rep*(1-rep) + repOD*repOD*state[5*k+3]*state[5*k+3]*rep*rep + 1)));
   }
 
   return (logarithm ? dm : exp(dm));
@@ -463,92 +439,96 @@ void stf<int, int>::imrprocess(int t, int s, int im, const vector<int>& prev, ve
 
 
 // // // imdmeasure // // //
-template<>
-vector<double> stf<int, int>::imdmeasure(int t, int s, vector<int> lookaheads, int im, const vector<int>& state, const vector<vector<int> >& meas, const vector<double>& theta, vector<vector<vector<double> > >& forecast_var, bool logarithm) {
-  // the density of auxiliary measurement distribution of y_{t+lookahead} given x_{t+s/im}
-  // note that the input s will take values between 1 and im (does not take value zero). Check stf_parallel.tpp
-  // we use projection of state to t+lookahead to compute pseudo-predictive likelihood
-  // when lookahead = 1 and s = im, this function should be the same as the dmeasure function.
-  // the length of lookaheads and the lengthe measurements should equal.
-
-  const int ncity = state.size()/5;
-  vector<double> rep_all; // reporting probability for all cities in the data file
-  rep_all.assign(repdata, repdata+NCITY);
-  vector<double> rep(ncity); // reporting probabilities for the cities being analyzed
-  for (int k = 0; k < ncity; k++)
-    rep[k] = rep_all[cityindex[k]];
+double marginal_dmeasure(int t, int k, const std::vector<int>& state, const std::vector<int>& meas, const std::vector<double>& theta) {
+  // k: the space component for which the marginal likelihood of observation is evaluated
+  const double rep = 1.0/(1.0+exp(-theta[7])); // reporting probability
   const double repOD = exp(theta[8]); // reporting overdispersion
 
-  // measurement density (log)
-  vector<double> dm(lookaheads.size(), 0.0);
-  vector<double> exp_dm(lookaheads.size(), 0.0);
+  double dm; // log density of measurement
 
-  int lasize = lookaheads.size(); // the total number of lookaheads
+  dm = dnpmf(meas[k], state[5*k+3] * rep, std::sqrt(state[5*k+3]*rep*(1-rep) + repOD*repOD*state[5*k+3]*state[5*k+3]*rep*rep + 1));
 
-  bool estimate_forecast_var = (s==1); // whether we update the estimated forecast variability at the current time point. Should always be re-estimated at s=1.
-  int s_last_fve = 1; // last intermediate step at which the forecast variability was estimated. Should correspond with how estimate_forecast_var was set.
-  if (estimate_forecast_var) {
-    int nforecast = 40; // number of random forecasts to make
-    vector<vector<vector<int> > > forecasts(nforecast, vector<vector<int> >(lasize)); // array structure: [forecast_id][lookahead_entry_id][space_dim]
-    std::mt19937 rng(4255427);
-    double delta_t = 0.25;
-    for (int fc = 0; fc < nforecast; fc++) {
-      simulate_rprocess(t+(s+0.0)/im, double(t+lookaheads[0]), state, forecasts[fc][0], theta, delta_t, rng);
-      for (int pos = 1; pos < lasize; pos++) {
-	simulate_rprocess(double(t+lookaheads[pos-1]), double(t+lookaheads[pos]), forecasts[fc][pos-1], forecasts[fc][pos], theta, delta_t, rng);
+  return dm;
+}
+
+
+template<>
+vector<double> stf<int, int>::imdmeasure(int t, int s, vector<int> lookaheads, int im, const vector<int>& state, const vector<vector<int> >& meas, const vector<double>& theta, bool logarithm) {
+  // the density of auxiliary measurement distribution of y_{t+lookahead} given x_{t+s/im}
+  // when lookahead = 1 and s = im, this function should be the same as the dmeasure function.
+  // the length of lookaheads and the length of measurements should equal.
+
+  int Jprime = 100; // number of particles used to estimate marginal likelihood of each component of y
+
+  const int ncity = state.size() / 5; // number of cities being analyzed
+
+  int rngseed = 834521; // use fixed seed to reduce variability in the ratio of two adjacent guide function evaluations
+  std::mt19937 g_rng(rngseed); // rng used for guide function evaluation
+  std::uniform_real_distribution<double> uniform(0.0, 1.0);
+
+  vector<double> ll(lookaheads.size(), 0.0); // log likelihood estimates of observation components
+
+  // the projections to (t+1) will be shared by all spatial coordinates. Store them to save computations.
+  vector<vector<int> > g_xP_t_plus_1(Jprime, vector<int>(5*ncity, 0));
+  for (int jp = 0; jp < Jprime; jp++)
+    simulate_rprocess(t+(s+0.0)/im, t+lookaheads[0]+0.0, state, g_xP_t_plus_1[jp], theta, 0.25, g_rng);
+
+  for (int k = 0; k < ncity; k++) {
+    // set up particles
+    vector<vector<int> > g_xF(Jprime, vector<int>(5*ncity, 0));
+    vector<vector<int> > g_xP(Jprime, vector<int>(5*ncity, 0));
+
+    for (size_t pos = 0; pos < lookaheads.size(); pos++) {
+      vector<double> weights(Jprime);
+      if (pos == 0) {
+	g_xP = g_xP_t_plus_1;
       }
-    }
-
-    for (int pos = 0; pos < lasize; pos++) {
-      forecast_var[pos].resize(ncity);
-      for (int k = 0; k < ncity; k++) {
-	vector<double> repCase_forecasts(nforecast); // forecasts of reported biweekly measles cases for this time point and space dimension
-	for (int fc = 0; fc < nforecast; fc++) {
-	  repCase_forecasts[fc] = forecasts[fc][pos][5*k+3] * rep[k];
+      for (int jp = 0; jp < Jprime; jp++) {
+	// propagate particles
+	if (pos > 0) {
+	  simulate_rprocess(t+(s+0.0)/im, t+lookaheads[pos]+0.0, g_xF[jp], g_xP[jp], theta, 0.25, g_rng);
 	}
-	quicksort(repCase_forecasts, 0, nforecast-1);
-	forecast_var[pos][k].resize(1);
-	double iqr = repCase_forecasts[int(nforecast*.75)] - repCase_forecasts[int(nforecast*.25)]; // inter-quartile range
-	double var_to_iqr2 = .55 * (1+2/sqrt(nforecast)); // distribution-specific ratio between the variance and the squared iqr (for scale families) (~0.55 for normal). Take a conservative number that takes into account the variability in the estimates of forecast variability itself. This translates into inflating the number by a factor (1+2*sqrt(nforecast)).
-	forecast_var[pos][k][0] = iqr*iqr*var_to_iqr2;
+	// evaluate particles
+	weights[jp] = marginal_dmeasure(t+lookaheads[pos], k, g_xP[jp], meas[pos], theta);
+      }
+      double sum_weights = std::accumulate(weights.begin(), weights.end(), 0.0);
+      ll[pos] += log(sum_weights/Jprime);
+      if (pos < lookaheads.size() - 1) { // for the last lookahead, no need for resampling
+	if (sum_weights > 0.0) { // resample
+	  for (int jp = 0; jp < Jprime; jp++) {
+	    weights[jp] /= sum_weights;
+	  }
+	  double p1 = uniform(g_rng) / Jprime;
+	  double p2 = 0.0;
+	  int j1 = -1;
+	  for(int j=0; j<Jprime; j++) {
+	    while(p2 < p1 && j1<Jprime-1)
+	      p2 += weights[++j1];
+	    g_xF[j] = g_xP[j1];
+	    p1 += 1.0/Jprime;
+	  }
+	}
+	else {
+	  g_xF = g_xP;
+	}
       }
     }
   }
-
-  vector<double> forc_base(state.size()); // initial state for making deterministic forcast
-  for (size_t k = 0; k < state.size(); k++) {
-    forc_base[k] = double(state[k]);
-  }
-  vector<double> det_forc; // deterministic forecast
-
-  for (int pos = 0; pos < lasize; pos++) {
-    double delta_t = 0.25;
-    simulate_deterministic_process((pos == 0 ? t+(s+0.0)/im : double(t+lookaheads[pos-1])), double(t+lookaheads[pos]), forc_base, det_forc, theta, delta_t);
-    forc_base = det_forc;
-    double scale_fv = (lookaheads[pos] - (s+0.0)/im) / std::max((lookaheads[pos] - (s_last_fve+0.0)/im), 1e-6); // scaling factor for forecast variance
-    for (int k = 0; k < ncity; k++) {
-      double meas_variance = det_forc[5*k+3]*rep[k]*(1-rep[k]) + repOD*repOD*det_forc[5*k+3]*det_forc[5*k+3]*rep[k]*rep[k] + 1; // measurement variance
-      dm[pos] += log(dnpmf(meas[pos][k], det_forc[5*k+3] * rep[k], std::sqrt(meas_variance + scale_fv * forecast_var[pos][k][0])));
-    }
-    exp_dm[pos] = exp(dm[pos]);
-  }
-  return (logarithm ? dm : exp_dm);
+  return ll;
 }
 
 
 
-
 template<>
-double stf<int, int>::imdmeasure(int t, int s, int im, const vector<int>& state, const vector<int>& meas, const vector<double>& theta, vector<vector<double> >& forecast_var_1step, bool logarithm) {
-  // the density of auxiliary measurement distribution of y_{t+1} given x_{t+s/im} (ONLY to the immediate next time point)
+double stf<int, int>::imdmeasure(int t, int s, int im, const vector<int>& state, const vector<int>& meas, const vector<double>& theta, bool logarithm) {
+  // the density of auxiliary measurement distribution of y_{t+1} given x_{t+s/im}
   // when s = im, this function should be the same as the dmeasure function.
 
   // set default values
   vector<int> lookaheads(1, 1);
   vector<vector<int> > observations(1, meas);
-  vector<vector<vector<double> > > forecast_var(1, forecast_var_1step);
 
-  vector<double> dm = imdmeasure(t, s, lookaheads, im, state, observations, theta, forecast_var, true);
+  vector<double> dm = imdmeasure(t, s, lookaheads, im, state, observations, theta, logarithm);
 
   return (logarithm ? dm[0] : exp(dm[0]));
 }
